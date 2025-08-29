@@ -13,9 +13,9 @@ class GitHubHelper:
         self.root = root
         self.root.title("GitHub Helper - Помощник для работы с Git")
         # Устанавливаем начальный размер, но разрешаем изменение
-        self.root.geometry("1200x700")  # Уменьшено с 1400x700
+        self.root.geometry("1400x900")  # Уменьшено с 1400x700
         self.root.configure(bg='#f0f0f0')
-        self.root.minsize(1000, 600)  # Минимальный размер
+        self.root.minsize(1200, 800)  # Минимальный размер
 
         # Переменные
         self.project_path = tk.StringVar()
