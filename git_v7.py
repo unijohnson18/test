@@ -508,7 +508,7 @@ class GitHubHelper:
 
         setup_window = tk.Toplevel(self.root)
         setup_window.title("🔗 Подключение к GitHub")
-        setup_window.geometry("550x500")
+        setup_window.geometry("650x600")
         setup_window.transient(self.root)
         setup_window.grab_set()
         setup_window.geometry("+%d+%d" % (
