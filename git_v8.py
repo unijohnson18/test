@@ -1,20 +1,24 @@
-#     git_v8.py
+# git_v8.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import subprocess
 import os
+import shutil
 from datetime import datetime
 import threading
+import sys
 import webbrowser
+import json
 
 
 class GitHubHelper:
     def __init__(self, root):
         self.root = root
         self.root.title("GitHub Helper - Помощник для работы с Git")
-        self.root.geometry("1400x900")
+        # Устанавливаем начальный размер, но разрешаем изменение
+        self.root.geometry("1400x900")  # Уменьшено с 1400x700
         self.root.configure(bg='#f0f0f0')
-        self.root.minsize(1200, 800)
+        self.root.minsize(1200, 800)  # Минимальный размер
 
         # Переменные
         self.project_path = tk.StringVar()
@@ -24,13 +28,76 @@ class GitHubHelper:
         self.user_info = tk.StringVar(value="Не настроен")
         self.connection_status = tk.StringVar(value="❌ Репозиторий не подключен")
 
-        # Создаём прокручиваемый интерфейс
+        # Загружаем команды Git из JSON
+        self.git_commands = self.load_git_commands()
+
+        # Создаём прокручиваемый фрейм для левой части
         self.setup_scrollable_ui()
 
+    def load_git_commands(self):
+        """Загружает список команд Git из JSON файла или создает его если не существует"""
+        commands_file = "git_commands.json"
+        default_commands = {
+            "Основные команды": {
+                "git status": "Показать статус репозитория (измененные файлы)",
+                "git log --oneline -10": "Показать последние 10 коммитов",
+                "git branch": "Показать все ветки",
+                "git branch --show-current": "Показать текущую ветку",
+                "git remote -v": "Показать удаленные репозитории"
+            },
+            "Работа с файлами": {
+                "git add .": "Добавить все измененные файлы в индекс",
+                "git add [filename]": "Добавить конкретный файл в индекс",
+                "git reset HEAD [filename]": "Убрать файл из индекса",
+                "git checkout -- [filename]": "Отменить изменения в файле",
+                "git rm [filename]": "Удалить файл из репозитория"
+            },
+            "Коммиты": {
+                "git commit -m \"[message]\"": "Создать коммит с сообщением",
+                "git commit --amend": "Изменить последний коммит",
+                "git reset --soft HEAD~1": "Отменить последний коммит (оставить изменения)",
+                "git reset --hard HEAD~1": "Отменить последний коммит (удалить изменения)"
+            },
+            "Ветки": {
+                "git checkout -b [branch_name]": "Создать и переключиться на новую ветку",
+                "git checkout [branch_name]": "Переключиться на ветку",
+                "git merge [branch_name]": "Слить ветку в текущую",
+                "git branch -d [branch_name]": "Удалить ветку"
+            },
+            "Удаленный репозиторий": {
+                "git fetch": "Загрузить изменения с удаленного репозитория",
+                "git pull": "Загрузить и применить изменения",
+                "git push": "Отправить изменения на удаленный репозиторий",
+                "git push --force-with-lease": "Принудительная отправка (безопасная)",
+                "git push -u origin [branch]": "Отправить ветку на удаленный репозиторий"
+            },
+            "Информация": {
+                "git diff": "Показать изменения в файлах",
+                "git diff --staged": "Показать изменения в индексе",
+                "git show": "Показать детали последнего коммита",
+                "git config --list": "Показать настройки Git"
+            }
+        }
+
+        try:
+            if os.path.exists(commands_file):
+                with open(commands_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                # Создаем файл с командами по умолчанию
+                with open(commands_file, 'w', encoding='utf-8') as f:
+                    json.dump(default_commands, f, ensure_ascii=False, indent=2)
+                return default_commands
+        except Exception as e:
+            print(f"Ошибка загрузки команд: {e}")
+            return default_commands
+
     def setup_scrollable_ui(self):
+        # Главный контейнер
         main_container = ttk.Frame(self.root)
         main_container.pack(fill="both", expand=True, padx=10, pady=10)
 
+        # PanedWindow для разделения на левую (прокручиваемую) и правую части
         main_pane = ttk.PanedWindow(main_container, orient=tk.HORIZONTAL)
         main_pane.pack(fill="both", expand=True)
 
@@ -38,6 +105,7 @@ class GitHubHelper:
         left_frame_outer = ttk.Frame(main_pane)
         main_pane.add(left_frame_outer, weight=3)
 
+        # Canvas + Scrollbar для прокрутки
         canvas = tk.Canvas(left_frame_outer, bg='#f0f0f0')
         scrollbar = ttk.Scrollbar(left_frame_outer, orient="vertical", command=canvas.yview)
         self.scrollable_frame = ttk.Frame(canvas)
@@ -53,16 +121,18 @@ class GitHubHelper:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # ПРАВАЯ ЧАСТЬ — консоль и подсказки
+        # Правая часть — консоль и подсказки (без прокрутки)
         right_frame = ttk.Frame(main_pane, padding="10")
         main_pane.add(right_frame, weight=1)
 
+        # Теперь размещаем UI в scrollable_frame
         self.setup_ui_content(self.scrollable_frame, right_frame)
 
     def setup_ui_content(self, left_frame, right_frame):
         # --- Содержимое ЛЕВОЙ ЧАСТИ ---
+        # Заголовок
         title_label = ttk.Label(left_frame, text="🔧 GitHub Helper - Помощник для новичков",
-                                font=('Arial', 16, 'bold'))
+                                font=('Arial', 16, 'bold'))  # Уменьшено с 18
         title_label.pack(pady=(0, 10))
 
         subtitle_label = ttk.Label(left_frame,
@@ -74,6 +144,7 @@ class GitHubHelper:
         system_frame = ttk.LabelFrame(left_frame, text="🔍 1. Проверка системы и настроек", padding="10")
         system_frame.pack(fill="x", pady=(0, 10))
 
+        # Git статус
         ttk.Label(system_frame, text="Git:", font=('Arial', 9, 'bold')).pack(anchor="w")
         git_status_frame = ttk.Frame(system_frame)
         git_status_frame.pack(fill="x", padx=(20, 0), pady=(0, 5))
@@ -81,6 +152,7 @@ class GitHubHelper:
         ttk.Button(git_status_frame, text="Проверить Git",
                    command=self.check_git_installation).pack(side="right")
 
+        # Пользователь
         ttk.Label(system_frame, text="Пользователь Git:", font=('Arial', 9, 'bold')).pack(anchor="w", pady=(5, 0))
         user_status_frame = ttk.Frame(system_frame)
         user_status_frame.pack(fill="x", padx=(20, 0), pady=(0, 5))
@@ -103,6 +175,7 @@ class GitHubHelper:
         ttk.Button(entry_frame, text="Выбрать",
                    command=self.select_project_folder).pack(side="right")
 
+        # Информация о проекте
         info_frame = ttk.Frame(project_frame)
         info_frame.pack(fill="x", pady=(5, 0))
 
@@ -110,12 +183,14 @@ class GitHubHelper:
         ttk.Label(info_frame, textvariable=self.current_branch).grid(row=0, column=1, sticky="w", padx=(5, 0))
 
         ttk.Label(info_frame, text="Удалённый репозиторий:", width=18).grid(row=1, column=0, sticky="w", pady=1)
-        ttk.Label(info_frame, textvariable=self.remote_info, wraplength=300).grid(row=1, column=1, sticky="w", padx=(5, 0))
+        ttk.Label(info_frame, textvariable=self.remote_info, wraplength=300).grid(row=1, column=1, sticky="w",
+                                                                                  padx=(5, 0))
 
         ttk.Label(info_frame, text="Статус подключения:", width=18).grid(row=2, column=0, sticky="w", pady=1)
         self.connection_label = ttk.Label(info_frame, textvariable=self.connection_status)
         self.connection_label.grid(row=2, column=1, sticky="w", padx=(5, 0))
 
+        # Кнопки
         btn_frame = ttk.Frame(project_frame)
         btn_frame.pack(fill="x", pady=(10, 0))
         ttk.Button(btn_frame, text="🔍 Проверить", command=self.check_project).pack(side="left", padx=(0, 5))
@@ -180,6 +255,88 @@ class GitHubHelper:
         ttk.Button(commit_btns, text="💾 Все", command=self.commit_all_changes).pack(side="left", padx=(0, 5))
         ttk.Button(commit_btns, text="🚀 Отправить", command=self.push_to_github).pack(side="left")
 
+        # 5. НОВАЯ СЕКЦИЯ: Ручное управление командами
+        manual_frame = ttk.LabelFrame(left_frame, text="⌨️ 5. Ручное управление командами Git", padding="10")
+        manual_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(manual_frame,
+                  text="Выполнение команд Git напрямую для опытных пользователей",
+                  foreground="blue", font=('Arial', 9)).pack(anchor="w", pady=(0, 10))
+
+        # Выбор из готовых команд
+        preset_frame = ttk.LabelFrame(manual_frame, text="📚 Готовые команды", padding="10")
+        preset_frame.pack(fill="x", pady=(0, 10))
+
+        # Выпадающий список категорий
+        ttk.Label(preset_frame, text="Категория:").pack(anchor="w")
+        self.command_category = ttk.Combobox(preset_frame, values=list(self.git_commands.keys()), state="readonly")
+        self.command_category.pack(fill="x", pady=(2, 5))
+        self.command_category.bind("<<ComboboxSelected>>", self.update_command_list)
+
+        # Выпадающий список команд
+        ttk.Label(preset_frame, text="Команда:").pack(anchor="w")
+        self.command_preset = ttk.Combobox(preset_frame, state="readonly")
+        self.command_preset.pack(fill="x", pady=(2, 5))
+        self.command_preset.bind("<<ComboboxSelected>>", self.update_command_description)
+
+        # Описание команды
+        ttk.Label(preset_frame, text="Описание:").pack(anchor="w")
+        self.command_description = ttk.Label(preset_frame, text="", foreground="gray",
+                                             font=('Arial', 9), wraplength=400)
+        self.command_description.pack(anchor="w", pady=(2, 5))
+
+        # Кнопка выполнения готовой команды
+        ttk.Button(preset_frame, text="▶️ Выполнить выбранную команду",
+                   command=self.execute_preset_command).pack(anchor="w", pady=(5, 0))
+
+        # Поле для ручного ввода
+        manual_input_frame = ttk.LabelFrame(manual_frame, text="✏️ Ручной ввод команды", padding="10")
+        manual_input_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(manual_input_frame, text="Введите команду Git:").pack(anchor="w")
+
+        input_frame = ttk.Frame(manual_input_frame)
+        input_frame.pack(fill="x", pady=(2, 5))
+
+        self.manual_command = ttk.Entry(input_frame, font=('Consolas', 9))
+        self.manual_command.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.manual_command.bind('<Return>', lambda e: self.execute_manual_command())
+
+        ttk.Button(input_frame, text="▶️ Выполнить",
+                   command=self.execute_manual_command).pack(side="right")
+
+        ttk.Label(manual_input_frame,
+                  text="💡 Пример: git log --graph --oneline",
+                  foreground="gray", font=('Arial', 8)).pack(anchor="w")
+
+        # Кнопки быстрого доступа
+        quick_buttons_frame = ttk.LabelFrame(manual_frame, text="⚡ Быстрые команды", padding="10")
+        quick_buttons_frame.pack(fill="x")
+
+        quick_btn_row1 = ttk.Frame(quick_buttons_frame)
+        quick_btn_row1.pack(fill="x", pady=(0, 5))
+
+        ttk.Button(quick_btn_row1, text="📊 Status",
+                   command=lambda: self.execute_command("git status")).pack(side="left", padx=(0, 5))
+        ttk.Button(quick_btn_row1, text="📋 Log",
+                   command=lambda: self.execute_command("git log --oneline -10")).pack(side="left", padx=(0, 5))
+        ttk.Button(quick_btn_row1, text="🌿 Branches",
+                   command=lambda: self.execute_command("git branch")).pack(side="left", padx=(0, 5))
+        ttk.Button(quick_btn_row1, text="🔄 Fetch",
+                   command=lambda: self.execute_command("git fetch")).pack(side="left")
+
+        quick_btn_row2 = ttk.Frame(quick_buttons_frame)
+        quick_btn_row2.pack(fill="x")
+
+        ttk.Button(quick_btn_row2, text="📥 Pull",
+                   command=lambda: self.execute_command("git pull")).pack(side="left", padx=(0, 5))
+        ttk.Button(quick_btn_row2, text="📤 Push",
+                   command=lambda: self.execute_command("git push")).pack(side="left", padx=(0, 5))
+        ttk.Button(quick_btn_row2, text="🔍 Diff",
+                   command=lambda: self.execute_command("git diff")).pack(side="left", padx=(0, 5))
+        ttk.Button(quick_btn_row2, text="ℹ️ Config",
+                   command=lambda: self.execute_command("git config --list")).pack(side="left")
+
         # --- ПРАВАЯ ЧАСТЬ: Консоль и подсказки ---
         console_frame = ttk.LabelFrame(right_frame, text="📺 Журнал операций", padding="10")
         console_frame.pack(fill="both", expand=True)
@@ -197,11 +354,258 @@ class GitHubHelper:
         self.setup_console_bindings()
 
         ttk.Button(console_frame, text="🗑️ Очистить", command=self.clear_console).pack(side="left")
-        ttk.Label(console_frame, text="Ctrl+C — копировать", foreground="gray", font=('Arial', 8)).pack(side="left", padx=5)
+        ttk.Label(console_frame, text="Ctrl+C — копировать", foreground="gray", font=('Arial', 8)).pack(side="left",
+                                                                                                        padx=5)
 
         self.log_message("🎉 Добро пожаловать в GitHub Helper!", 'info')
         self.log_message("Начните с проверки системы и выбора папки проекта.", 'info')
 
+    def update_command_list(self, event=None):
+        """Обновляет список команд при выборе категории"""
+        category = self.command_category.get()
+        if category and category in self.git_commands:
+            commands = list(self.git_commands[category].keys())
+            self.command_preset.config(values=commands)
+            self.command_preset.set("")
+            self.command_description.config(text="")
+
+    def update_command_description(self, event=None):
+        """Обновляет описание команды при выборе команды"""
+        category = self.command_category.get()
+        command = self.command_preset.get()
+        if category and command and category in self.git_commands:
+            if command in self.git_commands[category]:
+                description = self.git_commands[category][command]
+                self.command_description.config(text=description)
+
+    def execute_preset_command(self):
+        """Выполняет выбранную из списка команду"""
+        command = self.command_preset.get()
+        if not command:
+            messagebox.showwarning("Предупреждение", "Выберите команду для выполнения!")
+            return
+
+        # Проверяем шаблоны в команде
+        if "[filename]" in command or "[message]" in command or "[branch" in command:
+            self.show_command_template_dialog(command)
+        else:
+            self.execute_command(command)
+
+    def show_command_template_dialog(self, command_template):
+        """Показывает диалог для заполнения шаблона команды"""
+        template_window = tk.Toplevel(self.root)
+        template_window.title("📝 Заполнение параметров команды")
+        template_window.geometry("500x400")
+        template_window.transient(self.root)
+        template_window.grab_set()
+
+        main_frame = ttk.Frame(template_window, padding="20")
+        main_frame.pack(fill="both", expand=True)
+
+        ttk.Label(main_frame, text="📝 Заполните параметры для команды",
+                  font=('Arial', 12, 'bold')).pack(pady=(0, 15))
+
+        ttk.Label(main_frame, text=f"Команда: {command_template}",
+                  font=('Consolas', 10), background='#f0f0f0').pack(pady=(0, 15))
+
+        # Словарь для хранения значений параметров
+        params = {}
+        entries = {}
+
+        # Определяем какие параметры нужно заполнить
+        if "[filename]" in command_template:
+            ttk.Label(main_frame, text="Имя файла:", font=('Arial', 10, 'bold')).pack(anchor="w")
+            entries['filename'] = ttk.Entry(main_frame, font=('Arial', 10), width=40)
+            entries['filename'].pack(fill="x", pady=(2, 10))
+
+        if "[message]" in command_template:
+            ttk.Label(main_frame, text="Сообщение коммита:", font=('Arial', 10, 'bold')).pack(anchor="w")
+            entries['message'] = ttk.Entry(main_frame, font=('Arial', 10), width=40)
+            entries['message'].pack(fill="x", pady=(2, 10))
+
+        if "[branch_name]" in command_template or "[branch]" in command_template:
+            ttk.Label(main_frame, text="Имя ветки:", font=('Arial', 10, 'bold')).pack(anchor="w")
+            entries['branch'] = ttk.Entry(main_frame, font=('Arial', 10), width=40)
+            entries['branch'].pack(fill="x", pady=(2, 10))
+
+        # Результирующая команда
+        result_frame = ttk.LabelFrame(main_frame, text="Результат", padding="10")
+        result_frame.pack(fill="x", pady=(10, 15))
+
+        result_var = tk.StringVar(value=command_template)
+        result_label = ttk.Label(result_frame, textvariable=result_var,
+                                 font=('Consolas', 9), background='white')
+        result_label.pack(fill="x")
+
+        def update_result(*args):
+            """Обновляет превью команды в реальном времени"""
+            result = command_template
+            for key, entry in entries.items():
+                if key == 'filename':
+                    result = result.replace("[filename]", entry.get() or "[filename]")
+                elif key == 'message':
+                    result = result.replace("[message]", entry.get() or "[message]")
+                elif key == 'branch':
+                    result = result.replace("[branch_name]", entry.get() or "[branch_name]")
+                    result = result.replace("[branch]", entry.get() or "[branch]")
+            result_var.set(result)
+
+        # Привязываем обновление к изменениям в полях
+        for entry in entries.values():
+            entry.bind('<KeyRelease>', update_result)
+
+        # Кнопки
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(fill="x", pady=(10, 0))
+
+        def execute_filled_command():
+            final_command = result_var.get()
+
+            # Проверяем что все параметры заполнены
+            if "[" in final_command and "]" in final_command:
+                messagebox.showwarning("Предупреждение", "Заполните все параметры команды!")
+                return
+
+            template_window.destroy()
+            self.execute_command(final_command)
+
+        ttk.Button(buttons_frame, text="▶️ Выполнить", command=execute_filled_command).pack(side="right")
+        ttk.Button(buttons_frame, text="❌ Отмена", command=template_window.destroy).pack(side="right", padx=(0, 10))
+
+        # Фокус на первое поле
+        if entries:
+            list(entries.values())[0].focus()
+
+    def execute_manual_command(self):
+        """Выполняет команду, введенную вручную"""
+        command = self.manual_command.get().strip()
+        if not command:
+            messagebox.showwarning("Предупреждение", "Введите команду для выполнения!")
+            return
+
+        # Проверяем что команда начинается с git
+        if not command.startswith('git'):
+            result = messagebox.askyesno("Предупреждение",
+                                         f"Команда не начинается с 'git': {command}\n\nВыполнить её всё равно?")
+            if not result:
+                return
+
+        self.execute_command(command)
+        # Очищаем поле после выполнения
+        self.manual_command.delete(0, tk.END)
+
+    def execute_command(self, command):
+        """Универсальный метод для выполнения любой git команды"""
+        if not self.project_path.get():
+            messagebox.showwarning("Предупреждение", "Сначала выберите папку проекта!")
+            return
+
+        self.log_message(f"⌨️ РУЧНАЯ КОМАНДА: {command}", 'info')
+
+        # Специальная обработка для команд push
+        if command.startswith('git push') and not '--force' in command:
+            self._handle_push_with_conflict_detection(command)
+        else:
+            success, output = self.run_git_command(command)
+            if success:
+                self.log_message("✅ Команда выполнена успешно.", 'success')
+                # Обновляем информацию о проекте после выполнения команды
+                self.update_project_info_after_command(command)
+            else:
+                self.log_message("❌ Команда завершилась с ошибкой.", 'error')
+
+    def _handle_push_with_conflict_detection(self, push_command):
+        """Обрабатывает команду push с обнаружением конфликтов"""
+        self.log_message("🔍 Проверяем возможные конфликты перед отправкой...", 'info')
+
+        # Сначала выполняем fetch для получения актуальной информации
+        fetch_success, _ = self.run_git_command("git fetch", False)
+        if not fetch_success:
+            self.log_message("⚠️ Не удалось получить обновления с сервера", 'error')
+
+        # Проверяем статус
+        status_success, status_output = self.run_git_command("git status", False)
+        if status_success and ("behind" in status_output or "diverged" in status_output):
+            self.log_message("⚠️ Обнаружены конфликты! Удаленная ветка содержит новые изменения.", 'error')
+            self._show_conflict_resolution_dialog(push_command)
+            return
+
+        # Если конфликтов нет, выполняем обычный push
+        success, output = self.run_git_command(push_command)
+        if not success and ("rejected" in output or "non-fast-forward" in output):
+            self.log_message("❌ Push отклонен из-за конфликтов", 'error')
+            self._show_conflict_resolution_dialog(push_command)
+        elif success:
+            self.log_message("✅ Изменения успешно отправлены!", 'success')
+
+    def _show_conflict_resolution_dialog(self, original_push_command):
+        """Показывает диалог разрешения конфликтов"""
+        conflict_window = tk.Toplevel(self.root)
+        conflict_window.title("⚠️ Обнаружен конфликт")
+        conflict_window.geometry("600x400")
+        conflict_window.transient(self.root)
+        conflict_window.grab_set()
+
+        main_frame = ttk.Frame(conflict_window, padding="20")
+        main_frame.pack(fill="both", expand=True)
+
+        ttk.Label(main_frame, text="⚠️ Конфликт при отправке изменений",
+                  font=('Arial', 14, 'bold'), foreground='red').pack(pady=(0, 15))
+
+        info_text = ("Удаленная ветка содержит изменения, которых нет у вас локально.\n"
+                     "Выберите один из способов решения:")
+        ttk.Label(main_frame, text=info_text, wraplength=500).pack(pady=(0, 20))
+
+        # Опции решения
+        options_frame = ttk.LabelFrame(main_frame, text="Варианты решения", padding="15")
+        options_frame.pack(fill="x", pady=(0, 20))
+
+        def safe_pull():
+            conflict_window.destroy()
+            self.log_message("📥 Выполняем безопасное обновление...", 'info')
+            current_branch = self.current_branch.get().replace("✅ ", "").strip()
+            success, output = self.run_git_command(f"git pull origin {current_branch}")
+            if success:
+                self.log_message("✅ Обновление завершено. Попробуйте отправить изменения снова.", 'success')
+            else:
+                self.log_message(f"❌ Ошибка при обновлении: {output}", 'error')
+
+        def force_push():
+            result = messagebox.askyesno("Подтверждение",
+                                         "⚠️ ВНИМАНИЕ!\n\nПринудительная отправка может перезаписать чужие изменения!\n\nПродолжить?")
+            if result:
+                conflict_window.destroy()
+                force_command = original_push_command.replace("git push", "git push --force-with-lease")
+                self.log_message("🚨 Выполняем принудительную отправку...", 'info')
+                success, output = self.run_git_command(force_command)
+                if success:
+                    self.log_message("✅ Принудительная отправка выполнена успешно!", 'success')
+                else:
+                    self.log_message(f"❌ Ошибка принудительной отправки: {output}", 'error')
+
+        ttk.Button(options_frame, text="📥 Безопасно: сначала загрузить изменения (git pull)",
+                   command=safe_pull, width=50).pack(pady=(0, 10))
+
+        ttk.Button(options_frame, text="🚨 Принудительно: перезаписать удаленную ветку (--force-with-lease)",
+                   command=force_push, width=50).pack(pady=(0, 10))
+
+        ttk.Button(options_frame, text="❌ Отмена",
+                   command=conflict_window.destroy, width=50).pack()
+
+    def update_project_info_after_command(self, command):
+        """Обновляет информацию о проекте после выполнения команды"""
+        # Обновляем информацию для команд, которые могут изменить состояние
+        update_commands = ['checkout', 'branch', 'commit', 'pull', 'push', 'merge', 'remote']
+
+        if any(cmd in command for cmd in update_commands):
+            # Небольшая задержка для корректного обновления
+            self.root.after(500, self._delayed_project_update)
+
+    def _delayed_project_update(self):
+        """Отложенное обновление информации о проекте"""
+        self.check_project()
+
+    # Остальные методы остаются без изменений
     def setup_console_bindings(self):
         self.context_menu = tk.Menu(self.console, tearoff=0)
         self.context_menu.add_command(label="📋 Копировать", command=self.copy_selection_menu)
@@ -306,7 +710,7 @@ class GitHubHelper:
         else:
             self.git_status.set("❌ Git не найден")
             self.log_message("Git не найден! Необходима установка.", 'error')
-            self.log_message("💡 РЕШЕНИЕ: Скачайте Git с https://git-scm.com/  ", 'info')
+            self.log_message("💡 РЕШЕНИЕ: Скачайте Git с https://git-scm.com/", 'info')
 
     def check_git_user(self):
         self.log_message("Проверяем настройки пользователя Git...", 'info')
@@ -336,7 +740,8 @@ class GitHubHelper:
         ttk.Label(main_frame, text="🔧 Настройка пользователя Git",
                   font=('Arial', 14, 'bold')).pack(pady=(0, 20))
 
-        info_text = ("Git нужно знать ваше имя и email для подписи коммитов. Эти данные будут видны в истории изменений.")
+        info_text = ("Git нужно знать ваше имя и email для подписи коммитов. "
+                     "Эти данные будут видны в истории изменений.")
         ttk.Label(main_frame, text=info_text, wraplength=350,
                   justify="left", foreground="gray").pack(pady=(0, 20))
 
@@ -377,26 +782,51 @@ class GitHubHelper:
         help_window.geometry("600x500")
         help_text = scrolledtext.ScrolledText(help_window, wrap=tk.WORD, padx=10, pady=10)
         help_text.pack(fill="both", expand=True)
+
         help_content = """
-        🆘 Справка для начинающих
+🆘 СПРАВКА ДЛЯ НАЧИНАЮЩИХ
 
-        🔹 Git — система контроля версий
-        🔹 GitHub — сайт для хранения кода
+📚 ЧТО ТАКОЕ GIT И GITHUB?
+Git — это система контроля версий. Она помогает:
+• Сохранять историю изменений ваших файлов
+• Работать в команде над одним проектом
+• Откатывать изменения при необходимости
+• Создавать разные версии (ветки) проекта
 
-        🔧 Основные шаги:
-        1. Установите Git: https://git-scm.com/
-        2. Настройте имя и email (кнопка "Настроить")
-        3. Выберите папку с проектом
-        4. Если проект новый — нажмите "Создать"
-        5. Если уже есть репозиторий — нажмите "Проверить"
-        6. Добавьте описание изменений
-        7. Нажмите "Сохранить" и "Отправить"
+GitHub — это облачный сервис для хранения Git-репозиториев.
 
-        💡 Советы:
-        - Не пушьте конфиденциальные данные (пароли, ключи)
-        - Пишите понятные комментарии к коммитам
-        - Регулярно делайте push, чтобы не потерять изменения
+🔄 ОСНОВНОЙ РАБОЧИЙ ПРОЦЕСС:
+1. Изменяете файлы в проекте
+2. Добавляете их в "индекс" (git add)
+3. Создаете "коммит" — сохранение с описанием (git commit)
+4. Отправляете на GitHub (git push)
+
+⚙️ НАЧАЛЬНАЯ НАСТРОЙКА:
+1. Установите Git с официального сайта
+2. Настройте пользователя (имя и email)
+3. Создайте аккаунт на GitHub.com
+4. Инициализируйте репозиторий в папке проекта
+5. Подключите к удаленному репозиторию на GitHub
+
+🛠️ НОВЫЕ ВОЗМОЖНОСТИ:
+• Выпадающий список готовых команд с описаниями
+• Ручной ввод любых Git команд
+• Быстрые кнопки для частых операций
+• Автоматическое обнаружение конфликтов при push
+
+💡 ПОЛЕЗНЫЕ СОВЕТЫ:
+• Делайте коммиты часто и с осмысленными комментариями
+• Всегда проверяйте статус перед коммитом
+• Используйте git pull перед git push
+• Создавайте ветки для экспериментов
+
+❓ ЕСЛИ ЧТО-ТО ПОШЛО НE ТАК:
+• git status — покажет текущее состояние
+• git log — покажет историю коммитов  
+• git reset — отменит изменения
+• В крайнем случае — создайте резервную копию и начните заново
         """
+
         help_text.insert(tk.END, help_content)
         help_text.configure(state=tk.DISABLED)
         close_button = ttk.Button(help_window, text="✅ Понятно", command=help_window.destroy)
@@ -446,6 +876,8 @@ class GitHubHelper:
                 self.remote_info.set(f"✅ {remote_url}")
                 self.connection_status.set("✅ Репозиторий подключен")
                 self.log_message(f"Подключен к: {remote_url}", 'success')
+
+                # Проверяем возможность связи с удаленным репозиторием
                 self.test_remote_connection()
             else:
                 self.remote_info.set("❌ Не настроен")
@@ -458,6 +890,7 @@ class GitHubHelper:
             self.log_message("💡 РЕШЕНИЕ: Нажмите 'Подключить к GitHub'", 'info')
 
     def test_remote_connection(self):
+        """Проверяем связь с удаленным репозиторием"""
         self.log_message("Тестируем соединение с GitHub...", 'info')
         success, output = self.run_git_command("git ls-remote --heads origin", False)
         if success:
@@ -470,92 +903,28 @@ class GitHubHelper:
                 self.log_message("💡 Возможна проблема с аутентификацией. Проверьте настройки SSH/Token", 'info')
 
     def push_to_github(self):
+        # Проверяем, что проект выбран
         if not self.project_path.get():
             messagebox.showwarning("Предупреждение", "Сначала выберите папку проекта!")
             return
 
+        # Проверяем статус подключения
         if "не подключен" in self.connection_status.get().lower() or "не найден" in self.connection_status.get().lower():
             self.log_message("❌ Удаленный репозиторий не подключен. Открываем окно подключения...", 'error')
             self.setup_remote_repository()
             return
 
         self.log_message("🚀 ОТПРАВКА НА GITHUB", 'info')
-        threading.Thread(target=self._run_push_with_fetch_check).start()
+        self.log_message("Отправляем изменения на удаленный репозиторий...", 'info')
 
-    def _run_push_with_fetch_check(self):
+        # Запускаем push в отдельном потоке, чтобы не блокировать интерфейс
+        threading.Thread(target=self._run_push).start()
+
+    def _run_push(self):
         current_branch = self.current_branch.get().replace("✅ ", "").strip()
+        command = f"git push -u origin {current_branch}"
+        self._handle_push_with_conflict_detection(command)
 
-        # Шаг 1: git fetch origin
-        self.log_message("🔍 Проверяем наличие обновлений на удалённой ветке...", 'info')
-        success_fetch, _ = self.run_git_command(f"git fetch origin {current_branch}", False)
-        if not success_fetch:
-            self.log_message("⚠️ Не удалось получить информацию с удалённого репозитория.", 'error')
-            return
-
-        # Шаг 2: git status
-        success_status, status_output = self.run_git_command("git status", False)
-        if "your branch is behind" in status_output.lower():
-            self.log_message("⚠️ Обнаружены изменения на удалённой ветке, которых нет у вас!", 'error')
-            self.log_message("💡 Рекомендуется выполнить 'git pull' перед отправкой.", 'info')
-
-            # Спрашиваем пользователя
-            response = messagebox.askyesnocancel(
-                "Конфликт при push",
-                "Удалённая ветка содержит изменения, которых нет у вас.\n"
-                "Рекомендуется сначала загрузить их.\n\n"
-                "Выберите:\n"
-                "✅ Да — выполнить git pull и продолжить\n"
-                "❌ Нет — использовать принудительную отправку (осторожно!)\n"
-                "⛔ Отмена — отложить отправку"
-            )
-
-            if response is None:  # Отмена
-                self.log_message("Отправка отменена пользователем.", 'info')
-            elif response:  # Да → pull
-                self.log_message("Выполняем 'git pull origin ...' для интеграции изменений...", 'info')
-                success_pull, _ = self.run_git_command(f"git pull origin {current_branch}")
-                if success_pull:
-                    self.log_message("✅ Успешно объединили изменения. Продолжаем отправку...", 'success')
-                    self._attempt_push(current_branch)
-                else:
-                    self.log_message("❌ Ошибка при выполнении 'git pull'. Исправьте конфликты вручную.", 'error')
-            else:  # Нет → force push
-                force = messagebox.askyesno(
-                    "Принудительная отправка",
-                    "Вы уверены, что хотите перезаписать удалённую ветку?\n"
-                    "Это может привести к потере чужих изменений!\n\n"
-                    "Используйте только если вы уверены."
-                )
-                if force:
-                    self.log_message("⚠️ Выполняем принудительную отправку...", 'info')
-                    self.run_git_command(f"git push --force-with-lease origin {current_branch}")
-                else:
-                    self.log_message("Принудительная отправка отменена.", 'info')
-
-        elif "can be fast-forwarded" in status_output.lower() or "diverged" in status_output.lower():
-            self.log_message("⚠️ Ветки разошлись. Требуется слияние.", 'error')
-            self.log_message("💡 Рекомендуется выполнить 'git pull' для слияния изменений.", 'info')
-            self._handle_pull_suggestion(current_branch)
-        else:
-            # Можно пушить
-            self._attempt_push(current_branch)
-
-    def _handle_pull_suggestion(self, branch):
-        if messagebox.askyesno("Слияние веток", "Выполнить 'git pull' для объединения изменений?"):
-            success, _ = self.run_git_command(f"git pull origin {branch}")
-            if success:
-                self.log_message("✅ Ветки объединены. Попробуйте отправить снова.", 'success')
-            else:
-                self.log_message("❌ Ошибка при слиянии. Исправьте конфликты вручную.", 'error')
-
-    def _attempt_push(self, branch):
-        self.log_message(f"📤 Выполняем: git push -u origin {branch}", 'command')
-        success, output = self.run_git_command(f"git push -u origin {branch}")
-        if success:
-            self.log_message("✅ Изменения успешно отправлены на GitHub!", 'success')
-            self.root.after(100, self.check_remote_repository)
-        else:
-            self.log_message(f"❌ Ошибка при отправке: {output}", 'error')
 
     def setup_remote_repository(self):
         if not self.project_path.get():
@@ -575,14 +944,17 @@ class GitHubHelper:
         main_frame = ttk.Frame(setup_window, padding="20")
         main_frame.pack(fill="both", expand=True)
 
+        # Заголовок
         ttk.Label(main_frame, text="🔗 Подключение к GitHub",
                   font=('Arial', 14, 'bold')).pack(pady=(0, 20))
 
+        # Информация
         info_text = ("Чтобы отправлять код на GitHub, нужно подключить локальный\n"
                      "репозиторий к удаленному репозиторию на GitHub.")
         ttk.Label(main_frame, text=info_text, wraplength=500,
                   justify="left", foreground="gray").pack(pady=(0, 20))
 
+        # Инструкция
         instruction_frame = ttk.LabelFrame(main_frame, text="📝 Инструкция", padding="15")
         instruction_frame.pack(fill="x", pady=(0, 20))
 
@@ -597,6 +969,7 @@ class GitHubHelper:
         ttk.Button(instruction_frame, text="🌐 Открыть GitHub.com",
                    command=lambda: webbrowser.open("https://github.com/new")).pack(anchor="w")
 
+        # Поле ввода URL
         ttk.Label(main_frame, text="URL репозитория GitHub:",
                   font=('Arial', 10, 'bold')).pack(anchor="w")
         url_frame = ttk.Frame(main_frame)
@@ -604,6 +977,7 @@ class GitHubHelper:
         url_entry = ttk.Entry(url_frame, font=('Arial', 10))
         url_entry.pack(fill="x")
 
+        # Предзаполняем поле примером
         example_url = "https://github.com/username/repository.git"
         url_entry.insert(0, example_url)
 
@@ -611,6 +985,7 @@ class GitHubHelper:
                   text="💡 Пример: https://github.com/unijohnson18/test_reclama.git",
                   foreground="gray", font=('Arial', 9)).pack(anchor="w", pady=(0, 15))
 
+        # Статус подключения в окне
         status_frame = ttk.LabelFrame(main_frame, text="🔍 Статус", padding="10")
         status_frame.pack(fill="x", pady=(0, 20))
 
@@ -618,6 +993,7 @@ class GitHubHelper:
         status_label = ttk.Label(status_frame, textvariable=status_var, foreground="orange")
         status_label.pack(anchor="w")
 
+        # Кнопки
         buttons_frame = ttk.Frame(main_frame)
         buttons_frame.pack(fill="x", pady=(10, 0))
 
@@ -631,212 +1007,252 @@ class GitHubHelper:
             setup_window.update()
 
             self.log_message(f"🔗 Подключаем к репозиторию: {url}", 'info')
+
+            # Удаляем старое подключение если есть
             self.run_git_command("git remote remove origin", False)
+
+            # Добавляем новое подключение
             success, output = self.run_git_command(f'git remote add origin "{url}"')
             if success:
                 status_var.set("✅ Успешно подключено!")
                 self.log_message("✅ Удаленный репозиторий успешно подключен!", 'success')
-                self.check_remote_repository()
-                setup_window.destroy()
-                messagebox.showinfo("Успех",
-                                    "Репозиторий успешно подключен к GitHub!\n\nТеперь вы можете отправлять изменения на GitHub.")
+
+                # Обновляем информацию о подключении
+                self.remote_info.set(f"✅ {url}")
+                self.connection_status.set("✅ Репозиторий подключен")
+
+                # Предлагаем отправить первый коммит
+                self.root.after(2000, lambda: self._suggest_first_push(setup_window))
             else:
                 status_var.set("❌ Ошибка подключения")
-                messagebox.showerror("Ошибка", f"Не удалось подключить репозиторий:\n\n{output}")
+                self.log_message(f"❌ Ошибка подключения: {output}", 'error')
+                self.log_message("💡 Проверьте корректность URL и доступ к репозиторию", 'info')
 
-        def test_connection():
-            url = url_entry.get().strip()
-            if not url or url == example_url:
-                messagebox.showwarning("Предупреждение", "Введите URL репозитория для тестирования!")
-                return
+        def _suggest_first_push(parent_window):
+            result = messagebox.askyesno("Отправка изменений",
+                                         "Репозиторий подключен! Отправить изменения на GitHub сейчас?",
+                                         parent=parent_window)
+            if result:
+                parent_window.destroy()
+                self.push_to_github()
+            else:
+                parent_window.destroy()
 
-            status_var.set("⏳ Тестирование...")
-            setup_window.update()
-
-            if not (url.startswith('https://github.com/') or url.startswith('git@github.com:')):
-                status_var.set("❌ Неверный формат URL")
-                messagebox.showwarning("Предупреждение",
-                                       "URL должен начинаться с https://github.com/ или git@github.com:")
-                return
-
-            status_var.set("✅ URL корректен")
-            messagebox.showinfo("Тест", "URL выглядит корректно. Нажмите 'Подключить' для завершения.")
-
-        ttk.Button(buttons_frame, text="🧪 Тест URL",
-                   command=test_connection).pack(side="left", padx=(0, 10))
-        ttk.Button(buttons_frame, text="🔗 Подключить",
-                   command=connect_repository).pack(side="left", padx=(0, 10))
-        ttk.Button(buttons_frame, text="❌ Отмена",
-                   command=setup_window.destroy).pack(side="right")
-
+        ttk.Button(buttons_frame, text="🔗 Подключить", command=connect_repository).pack(side="right")
+        ttk.Button(buttons_frame, text="❌ Отмена", command=setup_window.destroy).pack(side="right", padx=(0, 10))
         url_entry.focus()
-        url_entry.select_range(0, tk.END)
 
     def init_repository(self):
         if not self.project_path.get():
             messagebox.showwarning("Предупреждение", "Сначала выберите папку проекта!")
             return
 
+        # Проверяем, есть ли уже репозиторий
+        if os.path.exists(os.path.join(self.project_path.get(), ".git")):
+            messagebox.showinfo("Информация", "В этой папке уже есть Git репозиторий!")
+            return
+
+        # Подтверждение
         result = messagebox.askyesno("Подтверждение",
-                                     "Создать новый Git репозиторий в выбранной папке?")
+                                     f"Создать новый Git репозиторий в папке:\n{self.project_path.get()}?")
         if not result:
             return
 
-        self.log_message("🚀 СОЗДАНИЕ НОВОГО РЕПОЗИТОРИЯ", 'info')
-        self.log_message("Инициализируем Git репозиторий...", 'info')
+        self.log_message("🆕 СОЗДАНИЕ РЕПОЗИТОРИЯ", 'info')
+        self.log_message("Инициализируем новый Git репозиторий...", 'info')
 
         success, output = self.run_git_command("git init")
         if success:
-            self.log_message("✅ Репозиторий успешно создан!", 'success')
-            self.current_branch.set("✅ main (новый)")
-            self.connection_status.set("❌ Репозиторий не подключен")
+            self.log_message("✅ Репозиторий создан успешно!", 'success')
 
-            gitignore_path = os.path.join(self.project_path.get(), '.gitignore')
-            if not os.path.exists(gitignore_path):
-                self.log_message("Создаем стандартный файл .gitignore...", 'info')
-                try:
-                    with open(gitignore_path, "w", encoding='utf-8') as f:
-                        f.write("__pycache__/\n")
-                        f.write("*.pyc\n")
-                        f.write("venv/\n")
-                        f.write(".vscode/\n")
-                        f.write("*.log\n")
-                    self.log_message("✅ .gitignore успешно создан.", 'success')
-                except Exception as e:
-                    self.log_message(f"❌ Не удалось создать .gitignore: {str(e)}", 'error')
-
-            self.log_message("Делаем первый коммит...", 'info')
+            # Создаем начальный коммит если есть файлы
+            self.log_message("Создаем первоначальный коммит...", 'info')
             self.run_git_command("git add .")
-            self.run_git_command('git commit -m "Initial commit"')
-            self.log_message("✅ Проект готов к работе!", 'success')
+
+            commit_success, _ = self.run_git_command('git commit -m "Initial commit"')
+            if commit_success:
+                self.log_message("✅ Начальный коммит создан!", 'success')
+
+            # Обновляем информацию о проекте
             self.check_project()
+
+            messagebox.showinfo("Успех", "Git репозиторий создан!\n\nТеперь вы можете подключить его к GitHub.")
         else:
-            self.log_message(f"❌ Не удалось инициализировать репозиторий: {output}", 'error')
+            self.log_message("❌ Ошибка создания репозитория", 'error')
+            messagebox.showerror("Ошибка", "Не удалось создать репозиторий!")
 
     def update_file_status(self):
-        if not self.project_path.get() or self.current_branch.get() == "❌ Не Git репозиторий":
-            self.log_message("⚠️ Сначала выберите валидный Git репозиторий!", 'info')
+        if not self.project_path.get():
             return
+
+        # Очищаем дерево
+        for item in self.file_tree.get_children():
+            self.file_tree.delete(item)
 
         self.log_message("🔄 Обновляем статус файлов...", 'info')
-        self.file_tree.delete(*self.file_tree.get_children())
-
         success, output = self.run_git_command("git status --porcelain", False)
+
         if success:
-            lines = output.strip().split('\n')
-            if not lines or output.strip() == "":
-                self.file_tree.insert('', 'end', text="Нет изменений для коммита",
-                                      values=('✅ Чисто', 'Все файлы сохранены'), tags=('status_clean',))
-                self.log_message("✅ Рабочий каталог чист, нет изменений для коммита.", 'success')
-                return
+            if output.strip():
+                for line in output.strip().split('\n'):
+                    if len(line) >= 3:
+                        status_code = line[:2]
+                        filename = line[3:]
 
-            for line in lines:
-                status = line[0:2].strip()
-                parts = line.strip().split(' ', 2)
-                filename = parts[2].strip() if len(parts) > 2 else parts[-1].strip()
-                if status == '??':
-                    self.file_tree.insert('', 'end', text=filename,
-                                          values=('❌ Не отслеживается', 'Нужно добавить'), tags=('status_untracked',))
-                elif status in ('M', 'A', 'D', 'R', 'C'):
-                    if status == 'M':
-                        description = 'Изменен'
-                    elif status == 'A':
-                        description = 'Добавлен'
-                    elif status == 'D':
-                        description = 'Удален'
-                    else:
-                        description = 'Изменен/Переименован'
-                    self.file_tree.insert('', 'end', text=filename,
-                                          values=('⚠️ Изменено', description), tags=('status_modified',))
+                        status_text, status_color = self._get_status_info(status_code)
+                        description = self._get_status_description(status_code)
 
-            self.file_tree.tag_configure('status_untracked', background='#ffcccc')
-            self.file_tree.tag_configure('status_modified', background='#ffff99')
-            self.file_tree.tag_configure('status_clean', background='#ccffcc')
-            self.log_message("✅ Статус файлов обновлен.", 'success')
-        else:
-            self.log_message("❌ Не удалось получить статус файлов.", 'error')
+                        item = self.file_tree.insert('', 'end', text=filename,
+                                                     values=(status_text, description))
 
-    def auto_fill_commit_message(self):
-        success, output = self.run_git_command("git status --porcelain", False)
-        if not success or not output.strip():
-            messagebox.showinfo("Информация", "Нет изменений для коммита. Автозаполнение невозможно.")
-            return
+                        # Применяем цвета
+                        self.file_tree.set(item, 'status', status_text)
+                        if status_color == 'green':
+                            self.file_tree.item(item, tags=('staged',))
+                        elif status_color == 'red':
+                            self.file_tree.item(item, tags=('modified',))
+                        elif status_color == 'blue':
+                            self.file_tree.item(item, tags=('untracked',))
 
-        lines = output.strip().split('\n')
-        messages = []
-        for line in lines:
-            status = line[0:2].strip()
-            filename = line[3:].strip()
-            if status == '??':
-                messages.append(f"Добавлен новый файл: {os.path.basename(filename)}")
-            elif status == 'M':
-                messages.append(f"Изменён файл: {os.path.basename(filename)}")
-            elif status == 'A':
-                messages.append(f"Добавлен файл в индекс: {os.path.basename(filename)}")
-            elif status == 'D':
-                messages.append(f"Удален файл: {os.path.basename(filename)}")
+                # Настраиваем цвета
+                self.file_tree.tag_configure('staged', foreground='green')
+                self.file_tree.tag_configure('modified', foreground='red')
+                self.file_tree.tag_configure('untracked', foreground='blue')
 
-        message = ", ".join(messages)
-        if len(message) > 80:
-            message = "Обновлены файлы: " + ", ".join([os.path.basename(l[3:].strip()) for l in lines])
-
-        self.commit_text.delete(1.0, tk.END)
-        self.commit_text.insert(tk.END, message)
-        self.log_message("Авто-комментарий сгенерирован.", 'info')
-
-    def commit_all_changes(self):
-        if not self.project_path.get() or self.current_branch.get() == "❌ Не Git репозиторий":
-            messagebox.showwarning("Предупреждение", "Сначала выберите валидный Git репозиторий!")
-            return
-
-        commit_message = self.commit_text.get(1.0, tk.END).strip()
-        if not commit_message:
-            messagebox.showwarning("Предупреждение", "Введите описание коммита!")
-            return
-
-        self.log_message("💾 СОХРАНЕНИЕ ВСЕХ ИЗМЕНЕНИЙ", 'info')
-        self.log_message("Добавляем все файлы в индекс...", 'info')
-
-        add_success, add_output = self.run_git_command("git add .")
-        if add_success:
-            self.log_message("Коммитим изменения...", 'info')
-            commit_success, commit_output = self.run_git_command(f'git commit -m "{commit_message}"')
-            if commit_success:
-                self.log_message("✅ Все изменения успешно сохранены!", 'success')
-                self.update_file_status()
-                self.commit_text.delete(1.0, tk.END)
+                self.log_message(f"Найдено изменений: {len(output.strip().split())}", 'info')
             else:
-                self.log_message(f"❌ Ошибка при коммите: {commit_output}", 'error')
+                # Нет изменений
+                self.file_tree.insert('', 'end', text="📁 Все файлы актуальны",
+                                      values=("✅ Чисто", "Нет изменений"))
+                self.log_message("✅ Рабочая область чистая - нет изменений", 'success')
         else:
-            self.log_message(f"❌ Ошибка при добавлении файлов: {add_output}", 'error')
+            self.log_message("❌ Ошибка получения статуса файлов", 'error')
+
+    def _get_status_info(self, status_code):
+        """Возвращает текст статуса и цвет для кода статуса git"""
+        status_map = {
+            'M ': ('📝 Изменен', 'green'),  # Modified and staged
+            ' M': ('📝 Изменен', 'red'),  # Modified not staged
+            'A ': ('➕ Добавлен', 'green'),  # Added to staging
+            'D ': ('🗑️ Удален', 'green'),  # Deleted from staging
+            ' D': ('🗑️ Удален', 'red'),  # Deleted not staged
+            'R ': ('📛 Переименован', 'green'),  # Renamed
+            'C ': ('📋 Скопирован', 'green'),  # Copied
+            '??': ('❓ Новый', 'blue'),  # Untracked
+            'MM': ('📝 Смешанный', 'red'),  # Modified in both index and worktree
+        }
+        return status_map.get(status_code, (f'❓ {status_code}', 'gray'))
+
+    def _get_status_description(self, status_code):
+        """Возвращает описание статуса файла"""
+        descriptions = {
+            'M ': 'В индексе, готов к коммиту',
+            ' M': 'Изменен, нужно добавить в индекс',
+            'A ': 'Добавлен в индекс, готов к коммиту',
+            'D ': 'Удален из индекса',
+            ' D': 'Удален, изменения не в индексе',
+            'R ': 'Переименован, в индексе',
+            'C ': 'Скопирован, в индексе',
+            '??': 'Новый файл, не отслеживается',
+            'MM': 'Изменен и в индексе и в рабочей области',
+        }
+        return descriptions.get(status_code, 'Неизвестный статус')
 
     def commit_selected_file(self):
-        selected_item = self.file_tree.focus()
-        if not selected_item:
-            messagebox.showwarning("Предупреждение", "Выберите файл для коммита из списка!")
+        selection = self.file_tree.selection()
+        if not selection:
+            messagebox.showwarning("Предупреждение", "Выберите файл для коммита!")
             return
 
-        filename = self.file_tree.item(selected_item, 'text')
         commit_message = self.commit_text.get(1.0, tk.END).strip()
         if not commit_message:
-            messagebox.showwarning("Предупреждение", "Введите описание коммита!")
+            messagebox.showwarning("Предупреждение", "Введите описание изменений!")
             return
 
-        self.log_message(f"💾 СОХРАНЕНИЕ ФАЙЛА: {filename}", 'info')
-        self.log_message(f"Добавляем файл {filename} в индекс...", 'info')
+        filename = self.file_tree.item(selection[0])['text']
+        if filename == "📁 Все файлы актуальны":
+            messagebox.showinfo("Информация", "Нет файлов для коммита!")
+            return
 
-        add_success, add_output = self.run_git_command(f'git add "{filename}"')
+        self.log_message("💾 КОММИТ ФАЙЛА", 'info')
+        self.log_message(f"Добавляем файл в индекс: {filename}", 'info')
+
+        # Добавляем файл в индекс
+        add_success, _ = self.run_git_command(f'git add "{filename}"')
         if add_success:
-            self.log_message("Коммитим изменения...", 'info')
-            commit_success, commit_output = self.run_git_command(f'git commit -m "{commit_message}"')
+            # Создаем коммит
+            commit_success, _ = self.run_git_command(f'git commit -m "{commit_message}"')
             if commit_success:
                 self.log_message(f"✅ Файл {filename} успешно сохранен!", 'success')
-                self.update_file_status()
                 self.commit_text.delete(1.0, tk.END)
+                self.update_file_status()
             else:
-                self.log_message(f"❌ Ошибка при коммите: {commit_output}", 'error')
+                self.log_message("❌ Ошибка создания коммита", 'error')
         else:
-            self.log_message(f"❌ Ошибка при добавлении файла: {add_output}", 'error')
+            self.log_message("❌ Ошибка добавления файла в индекс", 'error')
+
+    def commit_all_changes(self):
+        commit_message = self.commit_text.get(1.0, tk.END).strip()
+        if not commit_message:
+            messagebox.showwarning("Предупреждение", "Введите описание изменений!")
+            return
+
+        self.log_message("💾 КОММИТ ВСЕХ ИЗМЕНЕНИЙ", 'info')
+        self.log_message("Добавляем все измененные файлы в индекс...", 'info')
+
+        # Добавляем все файлы
+        add_success, _ = self.run_git_command("git add .")
+        if add_success:
+            # Создаем коммит
+            commit_success, output = self.run_git_command(f'git commit -m "{commit_message}"')
+            if commit_success:
+                self.log_message("✅ Все изменения успешно сохранены!", 'success')
+                self.commit_text.delete(1.0, tk.END)
+                self.update_file_status()
+            else:
+                if "nothing to commit" in output:
+                    self.log_message("ℹ️ Нет изменений для коммита", 'info')
+                else:
+                    self.log_message("❌ Ошибка создания коммита", 'error')
+        else:
+            self.log_message("❌ Ошибка добавления файлов в индекс", 'error')
+
+    def auto_fill_commit_message(self):
+        """Автоматически заполняет сообщение коммита на основе изменений"""
+        self.log_message("✨ Генерируем автоматическое сообщение коммита...", 'info')
+
+        success, output = self.run_git_command("git diff --staged --name-status", False)
+        if success and output.strip():
+            # Анализируем изменения
+            changes = output.strip().split('\n')
+            added_files = [line[2:] for line in changes if line.startswith('A')]
+            modified_files = [line[2:] for line in changes if line.startswith('M')]
+            deleted_files = [line[2:] for line in changes if line.startswith('D')]
+
+            message_parts = []
+            if added_files:
+                message_parts.append(f"Добавлено файлов: {len(added_files)}")
+            if modified_files:
+                message_parts.append(f"Изменено файлов: {len(modified_files)}")
+            if deleted_files:
+                message_parts.append(f"Удалено файлов: {len(deleted_files)}")
+
+            if message_parts:
+                auto_message = ", ".join(message_parts)
+            else:
+                auto_message = "Обновление проекта"
+        else:
+            # Если нет staged изменений, проверяем обычные изменения
+            success, output = self.run_git_command("git status --porcelain", False)
+            if success and output.strip():
+                lines = output.strip().split('\n')
+                auto_message = f"Обновление: изменено файлов ({len(lines)})"
+            else:
+                auto_message = "Обновление проекта"
+
+        self.commit_text.delete(1.0, tk.END)
+        self.commit_text.insert(1.0, auto_message)
+        self.log_message(f"✨ Сгенерировано сообщение: {auto_message}", 'info')
 
 
 if __name__ == "__main__":
